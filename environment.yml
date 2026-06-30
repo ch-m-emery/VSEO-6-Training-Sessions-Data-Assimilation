@@ -1,4 +1,4 @@
-name: env_vseo6
+name: environment
 dependencies:
   - python=3.14
   - pip
