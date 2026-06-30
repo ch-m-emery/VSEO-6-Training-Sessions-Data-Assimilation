@@ -31,3 +31,31 @@ class ReservoirModel:
         if gamma <= 0.:
             raise ValueError(f"Input gamma value must be > 0., got {gamma}")
         self._gamma = gamma       # Storage-to-discharge conversion coefficient >0
+
+    def _single_iteration(self, s_t=None, p_t=None):
+        """A single time iteration
+        :param s_t:
+        :param q_t:
+        :return:
+        """
+
+        if s_t is None:
+            raise ValueError("Missing input storage at time t")
+        if s_t < 0.:
+            raise Warning("Input storage at time t is negative")
+        if p_t is None:
+            raise ValueError("Missing input precipitation at time t")
+        if p_t < 0.:
+            raise Warning("Input precipitation at time t is negative")
+
+        s_next = self._alpha * s_t + self._beta * p_t
+        q_next = self._gamma * s_next
+
+        return s_next, q_next
+
+    def run(self):
+        """
+        :return:
+        """
+
+        print("to do")
