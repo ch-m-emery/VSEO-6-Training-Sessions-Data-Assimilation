@@ -1,0 +1,13 @@
+name: env_vseo6
+dependencies:
+  - python=3.14
+  - pip
+  - geopandas
+  - rasterio
+  - xarray
+  - seaborn
+  - pip:
+    - geodatasets
+    - SALib
+    - py_hydroweb
+    - pystac_client
