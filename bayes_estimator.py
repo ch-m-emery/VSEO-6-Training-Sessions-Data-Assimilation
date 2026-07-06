@@ -56,44 +56,54 @@ class DAExperiment():
         flt_max_q = np.amax(q_out_ts)*1.1
         flt_max_h = np.amax(h_out_ts)*1.1
 
-        fig, axis = plt.subplots(self.model.n_dim, 2)
+        fig, axis = plt.subplots(3, 3, figsize=(12, 9))
+        l_filled_positions = [(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)]
         fig.suptitle(title)
 
-        axis[0, 0].set_title("Discharge")
-        axis[0, 1].set_title("Height")
-        axis[self.model.n_dim - 1, 0].set_xlabel("Time iteration")
-        axis[self.model.n_dim - 1, 1].set_xlabel("Time iteration")
+        for k, (i, j) in enumerate(l_filled_positions):
+            ax = axis[i, j]
+            ax.set_title(f"Reach {k + 1}")
 
-        for il_i in range(self.model.n_dim):
-            axis[il_i, 0].plot(q_out_ts[il_i, :], "-b")
-            axis[il_i, 1].plot(h_out_ts[il_i, :], "-b")
-            axis[il_i, 0].set_ylabel(f"Reach {il_i + 1}")
-            axis[il_i, 0].set_ylim((0., flt_max_q))
-            axis[il_i, 1].set_ylim((0., flt_max_h))
+            ax.plot(q_out_ts[k, :], "-b", label="Q free run")
+            ax.set_ylabel("discharge")
+            ax.set_ylim((0., flt_max_q))
 
-        for e in self.dct_obs["reach"]:
-            row_obs = e-1
-            if row_obs < 0:
-                raise ValueError(
-                f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
-            if row_obs > self.model.n_dim:
-                raise ValueError(
-                f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+            ax_bis = ax.twinx()
+            ax_bis.plot(h_out_ts[k, :], "-b", color=(0.75, 0., 0.75), label="H free run")
 
-            if self.dct_obs["variable"] == "q":
-                col_obs = 0
-            elif self.dct_obs["variable"] == "h":
-                col_obs = 1
-            else:
-                raise ValueError("Unknown observation variable, must be 'h' or 'q'")
+            ax_bis.set_ylabel("height")
+            ax_bis.set_ylim((0., flt_max_h))
 
-            axis[row_obs, col_obs].plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="observations")
-            if col_obs == 0:
-                axis[row_obs, col_obs].plot(q_out_ts[row_obs, :], '-b', label="free run")
-            if col_obs == 1:
-                axis[row_obs, col_obs].plot(h_out_ts[row_obs, :], '-b', label="free run")
+            for e in self.dct_obs["reach"]:
+                row_obs = e - 1
+                if row_obs < 0:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs > self.model.n_dim:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs == k:
+                    if self.dct_obs["variable"] == "q":
+                        ax.plot(VEC_TOBS, self.dct_obs["yobs"], '. g', markeredgecolor=(0., 0.0, 1.), label="Q obs")
+                    elif self.dct_obs["variable"] == "h":
+                        ax_bis.plot(VEC_TOBS, self.dct_obs["yobs"], '. g', markeredgecolor=(0.5, 0.0, 0.5), label="H obs")
 
+                    else:
+                        raise ValueError("Unknown observation variable, must be 'h' or 'q'")
 
+            handles1, labels1 = ax.get_legend_handles_labels()
+            handles2, labels2 = ax_bis.get_legend_handles_labels()
+
+            handles = handles1 + handles2
+            labels = labels1 + labels2
+            ax.legend(handles, labels, loc='lower right', fontsize=8)
+            ax.grid(True, which='both', linestyle='--', alpha=0.6)
+
+        for i in range(3):
+            for j in range(3):
+                if (i, j) not in l_filled_positions:
+                    ax = axis[i, j]
+                    ax.set_visible(False)
         plt.draw()
         plt.show()
 
@@ -385,7 +395,7 @@ if __name__ == "__main__":
     }
 
     my_assim = DAExperiment(forward_model=free_run,
-                            dct_obs=dct_obs_1)
+                            dct_obs=dct_obs_3)
     my_assim.plot_model_vs_obs()
 
     # dct_ctl = { "exp": "state" }

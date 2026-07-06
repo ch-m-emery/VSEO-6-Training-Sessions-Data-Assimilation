@@ -14,7 +14,7 @@ class RiverModel:
     """A class to simulate a river routing model based on the Muskingum-Cunge model
     """
 
-    def __init__(self, n_dim=N_SIZE_NETWORK, mat_n_in=MAT_NETWORK, par_k_in=K_PRIOR, par_x_in=X_PRIOR):
+    def __init__(self, n_dim=N_SIZE_NETWORK, mat_n_in=MAT_NETWORK, par_k_in=K_PRIOR, par_x_in=X_PRIOR, par_qin_mul=1.0):
         """Class constructor
         :param n_dim: int
         :param mat_n_in: 2D np.array
@@ -73,6 +73,12 @@ class RiverModel:
             if par_x_in <= 0 :
                 raise ValueError("Input k-parameter must be positive")
             self._par_x_in = par_x_in * np.ones((self._n_dim,))
+
+        if par_qin_mul < 0.:
+            raise ValueError("Input qin_mul parameter must be positive")
+        if not isinstance(par_qin_mul, float):
+            raise TypeError("Input qin_mul parameter must be a float")
+        self._par_qin_mul = par_qin_mul
 
         self.qe = None
         self.qt0 = None
@@ -170,7 +176,7 @@ class RiverModel:
         q_out_ts[:,0] = vec_q_0
 
         for il_i in range(n_iter):
-            q_out_ts[:,il_i+1] = self._single_iteration(vec_q_in_t=mat_q_in_ts[:,il_i],
+            q_out_ts[:,il_i+1] = self._single_iteration(vec_q_in_t=mat_q_in_ts[:,il_i] * self._par_qin_mul,
                                                         vec_q_out_t=q_out_ts[:,il_i])
 
         return q_out_ts
@@ -198,30 +204,46 @@ class RiverModel:
         q_out = (h_in / RC_ALPHA) ** (1./RC_BETA)
         return q_out
 
-    def plot(self, q_out_ts, h_out_ts, title="Model outputs"):
+    def plot(self, q_out_ts, h_out_ts, mat_q_in_ts=QIN_TS, title="Model outputs"):
         """
         :param q_out_ts:
         :param h_out_ts:
         :return:
         """
 
-        flt_max_q = np.amax(q_out_ts)
-        flt_max_h = np.amax(h_out_ts)
+        flt_max_q = np.amax(q_out_ts)*1.1
+        flt_max_h = np.amax(h_out_ts)*1.1
 
-        fig, axis = plt.subplots(self._n_dim,2)
+        fig, axis = plt.subplots(3, 3, figsize=(12,9))
+        l_filled_positions = [(0, 0), (0, 1), (1, 1), (1,2), (2, 2)]
         fig.suptitle(title)
 
-        axis[0, 0].set_title("State - Discharge")
-        axis[0,1].set_title("Diagnostic - Height")
-        axis[self._n_dim-1, 0].set_xlabel("Time iteration")
-        axis[self._n_dim-1, 1].set_xlabel("Time iteration")
+        for k, (i, j) in enumerate(l_filled_positions):
+            ax = axis[i, j]
+            ax.set_title(f"Reach {k+1}")
 
-        for il_i in range(self._n_dim):
-            axis[il_i,0].plot(q_out_ts[il_i, :])
-            axis[il_i,1].plot(h_out_ts[il_i, :])
-            axis[il_i, 0].set_ylabel(f"Reach {il_i+1}")
-            axis[il_i, 0].set_ylim((0.,flt_max_q))
-            axis[il_i, 1].set_ylim((0., flt_max_h))
+            ax.plot(mat_q_in_ts[k,:], "--k", color=(0.0, 0.0, 0.75), linewidth=0.75, label="Qin")
+            ax.plot(q_out_ts[k, :], "-b", label="Qout")
+            handles1, labels1 = ax.get_legend_handles_labels()
+            ax.set_ylabel("discharge")
+            ax.set_ylim((0., flt_max_q))
+
+            ax_bis = ax.twinx()
+            ax_bis.plot(h_out_ts[k, :], "-b", color=(0.75, 0., 0.75), label="Hout")
+            handles2, labels2 = ax_bis.get_legend_handles_labels()
+            ax_bis.set_ylabel("height")
+            ax_bis.set_ylim((0., flt_max_h))
+
+            handles = handles1 + handles2
+            labels = labels1 + labels2
+            ax.legend(handles, labels, loc='lower right', fontsize=8)
+            ax.grid(True, which='both', linestyle='--', alpha=0.6)
+
+        for i in range(3):
+            for j in range(3):
+                if (i, j) not in l_filled_positions:
+                    ax = axis[i, j]
+                    ax.set_visible(False)
 
         plt.draw()
         plt.show()
