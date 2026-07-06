@@ -41,13 +41,14 @@ class SensitivityAnalysisRiver(SensitivityAnalysis):
     """A class to run a Sobol-based sensitivity analysis experiment over the river model
     """
 
-    def __init__(self):
+    def __init__(self, bool_qin=False):
         """Class constructor
         """
 
         super().__init__()
 
         self._nb_parameters = 3
+        self._bool_qin = False
         self._problem = {
             "num_vars": self._nb_parameters,
             "names": ["k", "x", "inflow"],
@@ -55,6 +56,15 @@ class SensitivityAnalysisRiver(SensitivityAnalysis):
                        [0.1, 0.3],
                        [0.999, 1.001]]
         }
+        if bool_qin:
+            self._bool_qin = True
+            self._problem = {
+                "num_vars": self._nb_parameters,
+                "names": ["k", "x", "inflow"],
+                "bounds": [[0.5, 2.5],
+                           [0.1, 0.3],
+                           [0.75, 1.25]]
+            }
 
         # Q sensitivity
         self._q_out_e = None
@@ -142,7 +152,8 @@ class SensitivityAnalysisRiver(SensitivityAnalysis):
             # Q - Sobol indices
             axis[1, 0].plot(self._si_q[i, :, 0], "-b", label="k")
             axis[1, 0].plot(self._si_q[i, :, 1], "-r", label="x")
-            # axis[1].plot(my_analysis._si[i, :, 2], "-g", label="inflow")
+            if self._bool_qin:
+                axis[1, 0].plot(self._si_q[i, :, 2], "-g", label="inflow")
             axis[1, 0].set_title("Sobol indices for Q")
             axis[1, 0].set_ylabel("Time iterations")
             axis[1, 0].legend()
@@ -150,7 +161,8 @@ class SensitivityAnalysisRiver(SensitivityAnalysis):
             # H - Sobol indices
             axis[1, 1].plot(self._si_h[i, :, 0], "-b", label="k")
             axis[1, 1].plot(self._si_h[i, :, 1], "-r", label="x")
-            # axis[1].plot(my_analysis._si[i, :, 2], "-g", label="inflow")
+            if self._bool_qin:
+                axis[1,1].plot(self._si_h[i, :, 2], "-g", label="inflow")
             axis[1, 1].set_title("Sobol indices for H")
             axis[1, 1].set_ylabel("Time iterations")
             axis[1, 1].legend()
@@ -166,7 +178,7 @@ if __name__ == "__main__":
     """Run model
     """
 
-    my_analysis = SensitivityAnalysisRiver()
+    my_analysis = SensitivityAnalysisRiver(bool_qin=True)
     my_analysis.generate_sample()
     my_analysis.generate_outputs_ensemble()
     my_analysis.estimate_sobol_ensemble()
