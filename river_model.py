@@ -97,6 +97,10 @@ class RiverModel:
     def n_dim(self):
         return self._n_dim
 
+    @property
+    def par_k(self):
+        return self._par_k_in
+
     def _set_c1(self, d_t=D_T):
         """Set C1 parameters from river network parameters
         """
