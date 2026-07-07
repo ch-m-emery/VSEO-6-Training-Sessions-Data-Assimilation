@@ -6,7 +6,7 @@ import numpy as np
 from PIL.TiffTags import SIGNED_BYTE
 from matplotlib import pyplot as plt
 
-from constants import N_SIZE_NETWORK, VEC_TOBS, VEC_T, SIG_O_Q, SIG_O_H, T_OBS_STEP, Q_T0, SIG_B_Q, QIN_TS, K_PRIOR
+from constants import N_SIZE_NETWORK, VEC_TOBS, VEC_T, SIG_O_Q, SIG_O_H, T_OBS_STEP, Q_T0, SIG_B_Q, QIN_TS, K_PRIOR, SIG_B_K
 from river_model import RiverModel
 
 
@@ -280,6 +280,212 @@ class DAExperiment():
         plt.draw()
         plt.show()
 
+    def perform_parameter_estimation_propagation(self, assim_iter=0, qe=QIN_TS, q_t0_in=Q_T0):
+        """
+        """
+
+        # Control vector
+        xb = self.model.par_k[0]
+
+        fig_par, axis_par = plt.subplots(1,1)
+        fig_par.suptitle("[parameter] Parameter estimation - propagation step")
+
+        for t_obs in VEC_TOBS:
+            axis_par.plot(t_obs*np.ones((2,)), np.array([0., 1.5]), '--k', linewidth=0.75)
+        axis_par.plot(np.array([0., VEC_TOBS[assim_iter]]), xb*np.ones((2,)), "-b", label="prior")
+        axis_par.set_ylabel("k parameter")
+        axis_par.set_xlim((0., np.amax(self.vec_t_obs)))
+        axis_par.set_ylim((0., 1.5))
+
+        # Propagate model
+        q_t0 = q_t0_in
+        q_in = qe[:, assim_iter * self.t_obs_step: assim_iter * self.t_obs_step + self.t_obs_step]
+        q_run = self.model.run(n_iter=self.t_obs_step,
+                                vec_q_0=q_t0,
+                                mat_q_in_ts=q_in)
+
+        flt_max_q = max(np.amax(q_run[:, assim_iter * self.t_obs_step: assim_iter * self.t_obs_step + self.t_obs_step+1]),
+                        np.amax(self.dct_obs["yobs"]))*1.1
+
+        fig_model, axis_model = plt.subplots(3, 3, figsize=(12, 9))
+        l_filled_positions = [(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)]
+        fig_model.suptitle("[model] Parameter estimation - propagation step")
+
+        for k, (i, j) in enumerate(l_filled_positions):
+            ax = axis_model[i, j]
+            ax.set_title(f"Reach {k + 1}")
+
+            ax.plot(q_run[k, assim_iter * self.t_obs_step: assim_iter * self.t_obs_step + self.t_obs_step+1], "-b", label="prior run")
+            ax.set_ylabel("discharge")
+            ax.set_ylim((0., flt_max_q))
+            ax.set_xlim((0., np.amax(self.vec_t_obs)))
+
+            for e in self.dct_obs["reach"]:
+                row_obs = e - 1
+                if row_obs < 0:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs > self.model.n_dim:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs == k:
+                    ax.plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="Q obs")
+
+            ax.legend(loc='lower right', fontsize=8)
+            ax.grid(True, which='both', linestyle='--', alpha=0.6)
+
+        for i in range(3):
+            for j in range(3):
+                if (i, j) not in l_filled_positions:
+                    ax = axis_model[i, j]
+                    ax.set_visible(False)
+        plt.draw()
+        plt.show()
+
+        return xb, q_run
+
+    def perform_parameter_estimation_analysis(self, assim_iter=0, xb=None, q_run=None):
+        """
+        """
+
+        # Bayes estimator parameters
+        B = self.sig_b ** 2
+        R = self.sig_o ** 2
+
+        H = np.zeros((1, self.model.n_dim))
+        for e in self.dct_obs["reach"]:
+            H[0, e - 1] = 1
+        K = (B / (B + R))
+
+        # Analysis
+        d = self.dct_obs["yobs"][assim_iter] - H @ q_run[:, -1]
+        xa = xb + K * d[0]
+        if xa < 0:
+            print("Warning: negative parameter value after assimilation")
+        print(xb, xa)
+
+        # Plots
+        fig_par, axis_par = plt.subplots(1, 1)
+        fig_par.suptitle("[parameter] Parameter estimation - analysis step")
+
+        for t_obs in VEC_TOBS:
+            axis_par.plot(t_obs * np.ones((2,)), np.array([0., 1.5]), '--k', linewidth=0.75)
+        axis_par.plot(np.array([0., VEC_TOBS[assim_iter]]), xb * np.ones((2,)), "-b", label="prior")
+        axis_par.plot(np.array([0., VEC_TOBS[assim_iter]]), xa * np.ones((2,)), "-r", label="analysis")
+        axis_par.set_ylabel("k parameter")
+        axis_par.set_xlim((0., np.amax(self.vec_t_obs)))
+        axis_par.set_ylim((0., 1.5))
+
+        flt_max_q = max(
+            np.amax(q_run[:, assim_iter * self.t_obs_step: assim_iter * self.t_obs_step + self.t_obs_step + 1]),
+            np.amax(self.dct_obs["yobs"])) * 1.1
+
+        fig_model, axis_model = plt.subplots(3, 3, figsize=(12, 9))
+        l_filled_positions = [(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)]
+        fig_model.suptitle("[model] Parameter estimation - analysis step")
+
+        for k, (i, j) in enumerate(l_filled_positions):
+            ax = axis_model[i, j]
+            ax.set_title(f"Reach {k + 1}")
+
+            ax.plot(q_run[k, assim_iter * self.t_obs_step: assim_iter * self.t_obs_step + self.t_obs_step + 1], "-b",
+                    label="prior run")
+            ax.set_ylabel("discharge")
+            ax.set_ylim((0., flt_max_q))
+            ax.set_xlim((0., np.amax(self.vec_t_obs)))
+
+            for e in self.dct_obs["reach"]:
+                row_obs = e - 1
+                if row_obs < 0:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs > self.model.n_dim:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs == k:
+                    ax.plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="Q obs")
+
+            ax.legend(loc='lower right', fontsize=8)
+            ax.grid(True, which='both', linestyle='--', alpha=0.6)
+
+        for i in range(3):
+            for j in range(3):
+                if (i, j) not in l_filled_positions:
+                    ax = axis_model[i, j]
+                    ax.set_visible(False)
+        plt.draw()
+        plt.show()
+
+        return xa
+
+    def perform_parameter_estimation_cycling(self, assim_iter=0, xb=None, xa=None, q_run=None, qe=QIN_TS, q_t0_in=Q_T0):
+        """
+        """
+
+        # Cycling
+        q_t0 = q_t0_in
+        q_in = qe[:, assim_iter * self.t_obs_step: assim_iter * self.t_obs_step + self.t_obs_step]
+        model_assim = RiverModel(par_k_in=xa)
+        qa_run = model_assim.run(n_iter=self.t_obs_step,
+                                vec_q_0=q_t0,
+                                mat_q_in_ts=q_in)
+
+        # Plots
+        fig_par, axis_par = plt.subplots(1, 1)
+        fig_par.suptitle("[parameter] Parameter estimation - cycling step")
+
+        for t_obs in VEC_TOBS:
+            axis_par.plot(t_obs * np.ones((2,)), np.array([0., 1.5]), '--k', linewidth=0.75)
+        axis_par.plot(np.array([0., VEC_TOBS[assim_iter]]), xb * np.ones((2,)), "-b", label="prior")
+        axis_par.plot(np.array([0., VEC_TOBS[assim_iter]]), xa * np.ones((2,)), "-r", label="analysis")
+        axis_par.set_ylabel("k parameter")
+        axis_par.set_xlim((0., np.amax(self.vec_t_obs)))
+        axis_par.set_ylim((0., 1.5))
+
+        flt_max_q = max(
+            np.amax(q_run[:, assim_iter * self.t_obs_step: assim_iter * self.t_obs_step + self.t_obs_step + 1]),
+            np.amax(qa_run),
+            np.amax(self.dct_obs["yobs"])) * 1.1
+
+        fig_model, axis_model = plt.subplots(3, 3, figsize=(12, 9))
+        l_filled_positions = [(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)]
+        fig_model.suptitle("[model] Parameter estimation - cycling step")
+
+        for k, (i, j) in enumerate(l_filled_positions):
+            ax = axis_model[i, j]
+            ax.set_title(f"Reach {k + 1}")
+
+            ax.plot(q_run[k, assim_iter * self.t_obs_step: assim_iter * self.t_obs_step + self.t_obs_step + 1], "-b",
+                    label="prior run")
+            ax.plot(qa_run[k, :], "-r",
+                    label="analysis run")
+            ax.set_ylabel("discharge")
+            ax.set_ylim((0., flt_max_q))
+            ax.set_xlim((0., np.amax(self.vec_t_obs)))
+
+            for e in self.dct_obs["reach"]:
+                row_obs = e - 1
+                if row_obs < 0:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs > self.model.n_dim:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs == k:
+                    ax.plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="Q obs")
+
+            ax.legend(loc='lower right', fontsize=8)
+            ax.grid(True, which='both', linestyle='--', alpha=0.6)
+
+        for i in range(3):
+            for j in range(3):
+                if (i, j) not in l_filled_positions:
+                    ax = axis_model[i, j]
+                    ax.set_visible(False)
+
+        plt.draw()
+        plt.show()
+
     def _perform_state_assim(self, qe=QIN_TS, q_t0_in=Q_T0, b_in=None):
         """
         """
@@ -454,28 +660,39 @@ class DAExperiment():
 
         flt_max_q = max(np.amax(q_bck_out_ts)*1.1, np.amax(q_ana_out_ts)*1.1)
 
-        fig, axis = plt.subplots(self.model.n_dim, 1)
-        fig.suptitle(title)
+        fig, axis = plt.subplots(3, 3, figsize=(12, 9))
+        l_filled_positions = [(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)]
+        fig.suptitle("State estimation - Full experiment")
 
-        axis[self.model.n_dim - 1].set_title("Time iteration")
+        for k, (i, j) in enumerate(l_filled_positions):
+            ax = axis[i, j]
+            ax.set_title(f"Reach {k + 1}")
 
-        for il_i in range(self.model.n_dim):
-            axis[il_i].plot(q_bck_out_ts[il_i, :], "-b")
-            axis[il_i].plot(q_ana_out_ts[il_i, :], "-r")
-            axis[il_i].set_ylabel(f"Reach {il_i + 1}")
+            ax.plot(q_bck_out_ts[k, :], "-b", label="free run")
+            ax.plot(q_ana_out_ts[k, :], "-r", linewidth=0.75, label="analysis run")
+            ax.set_ylabel("discharge")
+            ax.set_ylim((0., flt_max_q))
+            ax.set_xlim((0., np.amax(self.vec_t_obs)))
 
-        for e in self.dct_obs["reach"]:
-            row_obs = e - 1
-            if row_obs < 0:
-                raise ValueError(
-                    f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
-            if row_obs > self.model.n_dim:
-                raise ValueError(
-                    f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+            for e in self.dct_obs["reach"]:
+                row_obs = e - 1
+                if row_obs < 0:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs > self.model.n_dim:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs == k:
+                    ax.plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="Q obs")
 
-            axis[row_obs].plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="observations")
-            axis[row_obs].plot(q_bck_out_ts[row_obs, :], '-b', label="free run")
-            axis[row_obs].plot(q_ana_out_ts[row_obs, :], '-r', label="analysis run")
+            ax.legend(loc='lower right', fontsize=8)
+            ax.grid(True, which='both', linestyle='--', alpha=0.6)
+
+        for i in range(3):
+            for j in range(3):
+                if (i, j) not in l_filled_positions:
+                    ax = axis[i, j]
+                    ax.set_visible(False)
 
         plt.draw()
         plt.show()
@@ -484,63 +701,85 @@ class DAExperiment():
         """
         """
 
-        flt_max_h = max(np.amax(h_bck_out_ts)*1.1, np.amax(h_ana_out_ts)*1.1)
+        flt_max_h = max(np.amax(h_bck_out_ts) * 1.1, np.amax(h_ana_out_ts) * 1.1)
 
-        fig, axis = plt.subplots(self.model.n_dim, 1)
-        fig.suptitle(title)
+        fig, axis = plt.subplots(3, 3, figsize=(12, 9))
+        l_filled_positions = [(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)]
+        fig.suptitle("Diagnostic estimation - Full experiment")
 
-        axis[self.model.n_dim - 1].set_title("Time iteration")
+        for k, (i, j) in enumerate(l_filled_positions):
+            ax = axis[i, j]
+            ax.set_title(f"Reach {k + 1}")
 
-        for il_i in range(self.model.n_dim):
-            axis[il_i].plot(h_bck_out_ts[il_i, :], "-b")
-            axis[il_i].plot(h_ana_out_ts[il_i, :], "-r")
-            axis[il_i].set_ylabel(f"Reach {il_i + 1}")
+            ax.plot(h_bck_out_ts[k, :], "-b", label="free run")
+            ax.plot(h_ana_out_ts[k, :], "-r", linewidth=0.75, label="analysis run")
+            ax.set_ylabel("height")
+            ax.set_ylim((0., flt_max_h))
+            ax.set_xlim((0., np.amax(self.vec_t_obs)))
 
-        for e in self.dct_obs["reach"]:
-            row_obs = e - 1
-            if row_obs < 0:
-                raise ValueError(
-                    f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
-            if row_obs > self.model.n_dim:
-                raise ValueError(
-                    f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+            for e in self.dct_obs["reach"]:
+                row_obs = e - 1
+                if row_obs < 0:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs > self.model.n_dim:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs == k:
+                    ax.plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="H obs")
 
-            axis[row_obs].plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="observations")
-            axis[row_obs].plot(h_bck_out_ts[row_obs, :], '-b', label="free run")
-            axis[row_obs].plot(h_ana_out_ts[row_obs, :], '-r', label="analysis run")
+            ax.legend(loc='lower right', fontsize=8)
+            ax.grid(True, which='both', linestyle='--', alpha=0.6)
+
+        for i in range(3):
+            for j in range(3):
+                if (i, j) not in l_filled_positions:
+                    ax = axis[i, j]
+                    ax.set_visible(False)
 
         plt.draw()
         plt.show()
 
-    def plot_assim_param(self, q_bck_out_ts, q_ana_out_ts, q_final, title="Assimilation results - Discharge"):
+    def plot_assim_param(self, q_bck_out_ts, q_ana_out_ts, q_final, title="Parameter estimation - Full experiment"):
         """
         """
 
-        fig, axis = plt.subplots(self.model.n_dim, 1)
+        flt_max_q = max(np.amax(q_bck_out_ts) * 1.1, np.amax(q_ana_out_ts) * 1.1)
+
+        fig, axis = plt.subplots(3, 3, figsize=(12, 9))
+        l_filled_positions = [(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)]
         fig.suptitle(title)
 
-        axis[self.model.n_dim - 1].set_xlabel("Time iteration")
+        for k, (i, j) in enumerate(l_filled_positions):
+            ax = axis[i, j]
+            ax.set_title(f"Reach {k + 1}")
 
-        for il_i in range(self.model.n_dim):
-            axis[il_i].plot(q_bck_out_ts[il_i, :], "-b")
-            axis[il_i].plot(q_ana_out_ts[il_i, :], '--r', color=(1.0, 0.5, 0.))
-            axis[il_i].plot(q_final[il_i, :], "-r")
-            axis[il_i].set_ylabel(f"Reach {il_i + 1}")
+            ax.plot(q_bck_out_ts[k, :], "-b", label="free run")
+            ax.plot(q_ana_out_ts[k, :], '--r', color=(1.0, 0.5, 0.), label="analysis step")
+            ax.plot(q_final[k, :], "-r", label="analysis run")
+            ax.set_ylabel("discharge")
+            ax.set_ylim((0., flt_max_q))
+            ax.set_xlim((0., np.amax(self.vec_t_obs)))
 
-        for e in self.dct_obs["reach"]:
-            row_obs = e - 1
-            if row_obs < 0:
-                raise ValueError(
-                    f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
-            if row_obs > self.model.n_dim:
-                raise ValueError(
-                    f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+            for e in self.dct_obs["reach"]:
+                row_obs = e - 1
+                if row_obs < 0:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs > self.model.n_dim:
+                    raise ValueError(
+                        f"Invalid reach id, must be between 1 and {self.model.n_dim}, got {self.dct_obs["reach"]}.")
+                if row_obs == k:
+                    ax.plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="Q obs")
 
-            axis[row_obs].plot(VEC_TOBS, self.dct_obs["yobs"], '. g', label="observations")
-            axis[row_obs].plot(q_bck_out_ts[row_obs, :], '-b', label="free run")
-            axis[row_obs].plot(q_ana_out_ts[row_obs, :], '--r', label="sequential analysis", color=(1.0, 0.5, 0.))
-            axis[row_obs].plot(q_final[row_obs, :], "-r", label="analysis")
-            axis[row_obs].legend()
+            ax.legend(loc='lower right', fontsize=8)
+            ax.grid(True, which='both', linestyle='--', alpha=0.6)
+
+        for i in range(3):
+            for j in range(3):
+                if (i, j) not in l_filled_positions:
+                    ax = axis[i, j]
+                    ax.set_visible(False)
 
         plt.draw()
         plt.show()
@@ -566,20 +805,43 @@ if __name__ == "__main__":
         "reach": [3]
     }
 
-    my_assim = DAExperiment(forward_model=free_run,
-                            dct_obs=dct_obs_1)
-    # my_assim.plot_model_vs_obs()
-    xb, qb_run = my_assim.perform_state_estimation_propagation()
-    my_assim.sig_o = 0.2
-    my_assim.sig_b = 0.2
-    xa = my_assim.perform_state_estimation_analysis(xb=xb, q_run=qb_run)
-    my_assim.perform_state_estimation_cycling(xa=xa)
-
-    # dct_ctl = { "exp": "state" }
+    # Décomposition des étapes
     # my_assim = DAExperiment(forward_model=free_run,
-    #                                 dct_obs=dct_obs_1,
-    #                                 dct_ctl=dct_ctl)
-    # my_assim.sig_o = SIG_O_Q
+    #                         dct_obs=dct_obs_1)
+    # # my_assim.plot_model_vs_obs()
+    # xb, qb_run = my_assim.perform_state_estimation_propagation()
+    # my_assim.sig_o = 0.2
+    # my_assim.sig_b = 0.2
+    # xa = my_assim.perform_state_estimation_analysis(xb=xb, q_run=qb_run)
+    # my_assim.perform_state_estimation_cycling(xa=xa)
+
+    # Full DA experiment - parameter
+    dct_ctl = {"experiment_type": "parameter"}
+    my_assim = DAExperiment(forward_model=free_run,
+                            dct_obs=dct_obs_1,
+                            dct_ctl=dct_ctl)
+    xb, qb_run = my_assim.perform_parameter_estimation_propagation()
+    my_assim.sig_o = SIG_O_Q
+    my_assim.sig_b = SIG_B_K
+    xa = my_assim.perform_parameter_estimation_analysis(xb=xb, q_run=qb_run)
+    my_assim.perform_parameter_estimation_cycling(xb=xb, xa=xa, q_run=qb_run)
+
+    # Full experiment - parameter estimation
+    dct_ctl = {"experiment_type": "parameter"}
+    my_assim = DAExperiment(forward_model=free_run,
+                            dct_obs=dct_obs_1,
+                            dct_ctl=dct_ctl)
+    my_assim.sig_o = SIG_O_Q
+    my_assim.sig_b = SIG_B_K
+    my_assim.perform_assim()
+
+
+    # Full DA experiment - state
+    # dct_ctl = {"experiment_type": "state"}
+    # my_assim = DAExperiment(forward_model=free_run,
+    #                         dct_obs=dct_obs_1,
+    #                         dct_ctl=dct_ctl)
+    # my_assim.sig_o = 0.1
     # my_assim.sig_b = 0.5
     # B_in = np.array([
     #     [SIG_B_Q**2., 0., 0., 0., SIG_B_Q**2.*0.0625],
