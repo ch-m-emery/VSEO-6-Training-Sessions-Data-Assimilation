@@ -42,5 +42,5 @@ SIG_O_H = 0.1
 
 # Data assimilation - control vector
 SIG_B_Q = 0.5
-SIG_B_K = 0.5
+SIG_B_K = 0.4
 
